@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.jis.platform.ticket.mapper.StockMapper" >
+  <resultMap id="sessionDto" type="com.jis.platform.sdk.dto.ticket.SessionDto" >
+    <id column="id" property="id" jdbcType="BIGINT" />
+    <result column="name" property="name" jdbcType="VARCHAR" />
+  </resultMap>
+  
+  <resultMap id="categoryDto" type="com.jis.platform.sdk.dto.ticket.CategoryDto" >
+    <id column="id" property="id" jdbcType="BIGINT" />
+    <result column="name" property="name" jdbcType="VARCHAR" />
+    <result column="price" property="price" jdbcType="DECIMAL" />
+    <result column="discount" property="discount" jdbcType="DECIMAL" />
+  </resultMap>
+  
+  <resultMap id="sectionCountDto" type="com.jis.platform.sdk.dto.ticket.SectionCountDto" >
+    <id column="id" property="id" jdbcType="BIGINT" />
+    <result column="name" property="name" jdbcType="VARCHAR" />
+    <result column="ticketCount" property="count" jdbcType="INTEGER" />
+  </resultMap>
+  
+  <resultMap id="seatDetailDto" type="com.jis.platform.sdk.dto.ticket.SeatDetailDto" >
+    <id column="id" property="id" jdbcType="BIGINT" />
+    <result column="status" property="status" jdbcType="INTEGER" />
+    <result column="canvasX" property="canvasx" jdbcType="INTEGER" />
+    <result column="canvasY" property="canvasx" jdbcType="INTEGER" />
+    <result column="seatX" property="row" jdbcType="INTEGER" />
+    <result column="seatY" property="seat" jdbcType="INTEGER" />
+  </resultMap>
+
+  <!-- 根据活动ID获取场次列表（包括套票） -->
+  <select id="selectSessionListByEventId" resultMap="sessionDto" parameterType="java.lang.String">
+        SELECT subActivity_PackTicketID AS id, subActivity_PackTicketName AS name
+        FROM SubActivityInfos WHERE activityInfoID = #{eventId} AND removed = 0 AND isActivate = 1
+  </select>
+  
+  <!-- 根据活动ID和商户ID获取票种列表（ID：赛票种类ID(和票种ID有区别)，NAME：票种（这里ticketTypeName和tradeTicketTypeName字段区别在于前者少了“标准票”三个字）） -->
+  <select id="selectCategoryListBySessionId" resultMap="categoryDto" parameterType="java.lang.String">
+		SELECT TradeTicketTypeInstancesID AS id, ticketTypeName AS name, ticketPrice AS price, (CASE WHEN discount IS NULL THEN 1 ELSE discount END) AS discount
+        FROM TradeTicketTypeInstances t LEFT JOIN DistributorTradeTicketDicounts d
+        ON t.TradeTicketTypeInstancesID = d.tradeTicketTypeInstanceID AND distributorID = #{distributorId}
+        WHERE subActivityID = #{eventId} AND t.removed = '0' AND isNormalTicket = 1 ORDER BY t.orders
+  </select>
+  
+  <!-- 根据赛票种类ID（和票种ID有区别）和商户ID获取分区库存列表（票种ID和商户ID还用来限制分区使用的） -->
+  <select id="selectSectionListByCategoryId" resultMap="sectionCountDto" parameterType="java.lang.String">
+        SELECT s.id, s.name, s.ticketCount FROM
+        (SELECT subAreaID1 AS id ,subAreaName1 AS NAME, SUM(ticketForSaleCount) AS ticketCount
+        FROM ActivityTicketStats WHERE tradeTicketTypeInstanceID = #{categoryId}
+        GROUP BY subAreaID1) s
+        LEFT JOIN
+        (SELECT b.activityInfoID, a.subActivity_PackTicketID, a.stadiumAreaID, CASE WHEN (a.merchantPropertiesID = c.merchantPropertiesID) THEN 1 ELSE 0 END AS xg FROM LimitedPurchaseAreaInfos a
+        LEFT JOIN SubActivityInfos b ON a.subActivity_PackTicketID = b.subActivity_PackTicketID
+        LEFT JOIN (SELECT activityInfoID, merchantPropertiesID FROM DistributorLimitInfos WHERE removed = 0 AND distributorID = #{distributorId}) c ON b.activityInfoID = c.activityInfoID
+        WHERE a.removed = 0 AND a.subActivity_PackTicketID = (SELECT subActivityID FROM TradeTicketTypeInstances WHERE TradeTicketTypeInstancesID = #{categoryId})) t
+        ON s.id = t.stadiumAreaID
+        GROUP BY s.id HAVING SUM(t.xg) = 0 OR SUM(t.xg) IS NULL
+  </select>
+  
+   <!-- 据活动、场次、票种、分区获取座位明细信息 -->
+  <select id="selectSeatListBySectionId" resultMap="seatDetailDto" parameterType="java.lang.String">
+	  SELECT seatInfoID as id,canvasX, canvasY, seatX, seatY, status FROM ActivityTicketInfos 
+	  WHERE removed= 0
+		AND tradeTicketTypeInstancesID =  #{categoryId}
+		AND subAreaID1 = #{sectionId}
+  </select>
+</mapper>
